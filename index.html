@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sports Management</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+/* ---------- Tokens ---------- */
+:root {
+  --ink: #16233b;
+  --pitch: #1f5c3f;
+  --chalk: #f3f6f5;
+  --paper: #ffffff;
+  --court: #2c6bb0;
+  --whistle: #f0b400;
+  --line: #d5ddda;
+  --muted: #5b6b73;
+  --danger: #b3372f;
+
+  --font-display: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+  --font-body: "Barlow", "Segoe UI", system-ui, sans-serif;
+
+  --radius: 6px;
+  --sidebar-w: 232px;
+}
+
+/* Each game has its own colour */
+[data-game="cricket"] { --accent: #1f5c3f; }
+[data-game="kabaddi"] { --accent: #2b3f8c; }
+[data-game="bgmi"]    { --accent: #4d5a36; }
+
+/* ---------- Base ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--chalk);
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  line-height: 1.05;
+  margin: 0;
+  letter-spacing: 0.01em;
+}
+h1 { font-size: 2.6rem; }
+h2 { font-size: 1.6rem; margin-bottom: 0.75rem; }
+h3 { font-size: 1.5rem; }
+
+p { margin: 0; }
+
+button, input, select { font: inherit; color: inherit; }
+
+:focus-visible {
+  outline: 3px solid var(--court);
+  outline-offset: 2px;
+}
+
+.muted { color: var(--muted); }
+
+/* ---------- Form controls ---------- */
+label {
+  display: flex; flex-direction: column; gap: 0.3rem;
+  font-size: 0.9rem; font-weight: 500;
+}
+
+input, select {
+  padding: 0.55rem 0.7rem;
+  background: var(--paper);
+  border: 1px solid #b9c4c0;
+  border-radius: var(--radius);
+  min-height: 42px;
+  width: 100%;
+}
+input::placeholder { color: #8a979c; }
+
+.btn {
+  min-height: 42px;
+  padding: 0.55rem 1.1rem;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--paper);
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) { background: var(--chalk); }
+.btn.primary { background: var(--ink); color: #fff; }
+.btn.primary:hover:not(:disabled) { background: #0f1a2d; }
+.btn.small { min-height: 34px; padding: 0.3rem 0.75rem; font-size: 0.9rem; }
+.btn.block { width: 100%; }
+.btn.danger { border-color: var(--danger); color: var(--danger); }
+.btn.danger:hover:not(:disabled) { background: #fbeceb; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.link-btn {
+  padding: 0; border: 0; background: none;
+  color: var(--court); text-decoration: underline; cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.form-row { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; }
+.form-row label { flex: 1 1 200px; }
+
+.form-error {
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #efc4c1;
+  border-radius: var(--radius);
+  background: #fbeceb;
+  color: var(--danger);
+  font-size: 0.95rem;
+}
+
+/* ---------- Login screen ---------- */
+.auth {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  display: flex; flex-direction: column; gap: 1rem;
+  padding: 1.5rem;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.tabs { display: flex; border-bottom: 1px solid var(--line); }
+.tab {
+  flex: 1;
+  padding: 0.6rem 0.25rem;
+  font-size: 0.92rem;
+  white-space: nowrap;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: none;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+.tab.is-active { color: var(--ink); border-bottom-color: var(--pitch); }
+
+/* ---------- App layout ---------- */
+.app {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.5rem 1.25rem;
+  background: var(--paper);
+  border-right: 1px solid var(--line);
+}
+
+.brand { display: flex; align-items: center; gap: 0.75rem; }
+
+.brand-mark {
+  width: 38px; height: 38px; flex: none;
+  border-radius: 50%;
+  border: 3px solid var(--pitch);
+  background:
+    linear-gradient(var(--pitch), var(--pitch)) center / 3px 100% no-repeat,
+    radial-gradient(circle, var(--pitch) 0 4px, transparent 5px);
+}
+
+.brand-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.user-chip {
+  display: flex; flex-direction: column; gap: 0.35rem; align-items: flex-start;
+  padding: 0.7rem 0.85rem;
+  background: var(--chalk);
+  border-radius: var(--radius);
+  overflow-wrap: anywhere;
+}
+
+.nav { display: flex; flex-direction: column; gap: 0.25rem; }
+
+.nav-btn {
+  display: flex; align-items: center; gap: 0.6rem;
+  text-align: left;
+  padding: 0.6rem 0.85rem;
+  border: 0;
+  border-left: 4px solid transparent;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: transparent;
+  font-weight: 500;
+  cursor: pointer;
+}
+.nav-btn:hover { background: var(--chalk); }
+.nav-btn.is-active {
+  background: var(--chalk);
+  border-left-color: var(--ink);
+  font-weight: 600;
+}
+.nav-btn .dot {
+  width: 10px; height: 10px; flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.sidebar-foot { margin-top: auto; }
+
+.main { padding: 2rem clamp(1rem, 4vw, 3rem) 4rem; max-width: 1100px; width: 100%; min-width: 0; }
+
+/* ---------- Panels & badges ---------- */
+.panel {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+.panel > p { margin-bottom: 0.75rem; }
+.panel.note { background: #eef5f1; border-color: #b7d8c4; }
+.panel.warn { background: #fff7de; border-color: #ecd589; }
+
+.section-head {
+  display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.5rem;
+  margin: 1.75rem 0 0.75rem;
+}
+.section-head h2 { margin: 0; }
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--chalk);
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge.captain { background: var(--ink); color: #fff; border-color: var(--ink); }
+.badge.admin { background: var(--court); color: #fff; border-color: var(--court); }
+.badge.extra { background: var(--whistle); color: var(--ink); border-color: var(--whistle); }
+.badge.open { background: #e3f2ea; color: var(--pitch); border-color: #b7d8c4; }
+.badge.full { background: #fbeceb; color: var(--danger); border-color: #efc4c1; }
+.badge.yours { background: #e6eefa; color: var(--court); border-color: #bcd0ea; }
+
+/* ---------- Hero ---------- */
+.hero {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 1.5rem;
+  padding: 2rem 1.5rem;
+  border-radius: var(--radius);
+  color: #fff;
+  background: var(--accent, var(--pitch));
+  border: 3px solid rgba(255, 255, 255, 0.85);
+}
+.hero::after {
+  content: "";
+  position: absolute; top: 50%; right: -40px;
+  width: 200px; height: 200px; margin-top: -100px;
+  border: 3px solid rgba(255, 255, 255, 0.4);
+  border-radius: 50%;
+}
+.hero > * { position: relative; z-index: 1; }
+.hero h1 { font-size: clamp(2.6rem, 9vw, 4.4rem); }
+.hero p { margin-top: 0.5rem; max-width: 52ch; }
+
+.hero-stats { display: flex; flex-wrap: wrap; gap: 0.5rem 2rem; margin-top: 1.25rem; }
+.hero-stats b { display: block; font-family: var(--font-display); font-size: 2rem; line-height: 1; }
+.hero-stats span { font-size: 0.9rem; opacity: 0.9; }
+
+.meter {
+  margin-top: 1rem; max-width: 420px; height: 10px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 999px; overflow: hidden;
+}
+.meter > span { display: block; height: 100%; background: var(--whistle); }
+
+/* ---------- Home ---------- */
+.game-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.game-card {
+  display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start;
+  padding: 1.25rem;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-left: 8px solid var(--accent);
+  border-radius: var(--radius);
+}
+.game-card h2 { margin: 0; }
+.game-card .btn { margin-top: auto; }
+
+.plain-list { list-style: none; margin: 0; padding: 0; }
+.plain-list li {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.plain-list li:last-child { border-bottom: 0; }
+
+/* ---------- Tables ---------- */
+.table-wrap { padding: 0; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td {
+  padding: 0.7rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+th { font-size: 0.85rem; font-weight: 600; color: var(--muted); background: #fafcfb; }
+tbody tr:last-child td { border-bottom: 0; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.empty { padding: 1.5rem 1rem; color: var(--muted); text-align: center; }
+tr.mine td { background: #eef4fb; font-weight: 600; }
+tbody tr:first-child td:first-child { box-shadow: inset 4px 0 0 var(--whistle); }
+td.pts { font-weight: 700; }
+
+.pt-input { width: 96px; text-align: center; }
+
+/* ---------- Teams ---------- */
+.team-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+.team-card {
+  max-width: 680px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-top: 6px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem 1.1rem;
+}
+.team-card.mine { border-color: var(--court); border-top-color: var(--accent); box-shadow: 0 0 0 2px #bcd0ea; }
+.team-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.team-head h3 { overflow-wrap: anywhere; }
+.team-meta { margin: 0.25rem 0 0.75rem; font-size: 0.92rem; color: var(--muted); }
+.team-badges { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+
+.squad { list-style: none; margin: 0; padding: 0; }
+.slot {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem;
+  min-height: 42px;
+  padding: 0.35rem 0.4rem;
+  border-bottom: 1px solid var(--line);
+}
+.slot-no {
+  width: 2rem; flex: none;
+  font-family: var(--font-display); font-weight: 700; font-size: 1.1rem;
+  color: var(--muted);
+}
+.slot-name { flex: 1 1 100px; min-width: 0; overflow-wrap: anywhere; }
+.slot.empty .slot-name { color: var(--muted); }
+.slot.is-extra { background: #fff9e6; }
+.slot-actions { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+
+.squad-divider {
+  padding: 0.5rem 0.4rem 0.35rem;
+  border-bottom: 2px solid var(--whistle);
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.hint { margin-top: 0.6rem; font-size: 0.9rem; color: var(--muted); }
+.team-actions { margin-top: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+/* ---------- Match history ---------- */
+.history-item { padding: 0.9rem 0; border-bottom: 1px solid var(--line); }
+.history-item:last-child { border-bottom: 0; padding-bottom: 0; }
+.history-item:first-child { padding-top: 0; }
+.history-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; margin-bottom: 0.5rem; }
+.history-head .btn { margin-left: auto; }
+.chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.chips li {
+  padding: 0.2rem 0.65rem;
+  background: var(--chalk);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.92rem;
+}
+.chips b { margin-left: 0.3rem; }
+
+/* ---------- Dialog & toast ---------- */
+.modal {
+  position: fixed; inset: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: center;
+  padding: 1rem;
+  background: rgba(22, 35, 59, 0.5);
+}
+.modal-box { width: 100%; max-width: 380px; padding: 1.25rem; background: var(--paper); border-radius: var(--radius); }
+.modal-box p { white-space: pre-line; margin-bottom: 1rem; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+
+.toast {
+  position: fixed; left: 50%; bottom: 1.5rem;
+  transform: translate(-50%, 20px);
+  width: max-content; max-width: calc(100vw - 2rem);
+  padding: 0.7rem 1.2rem;
+  background: var(--ink); color: #fff;
+  border-radius: var(--radius);
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 30;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.error { background: var(--danger); }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 820px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+
+  .sidebar {
+    position: static; height: auto;
+    flex-direction: row; flex-wrap: wrap; align-items: center;
+    gap: 0.75rem 1.25rem; padding: 1rem;
+    border-right: 0; border-bottom: 1px solid var(--line);
+  }
+  .user-chip { flex-direction: row; align-items: center; }
+  .nav { order: 3; flex-direction: row; width: 100%; overflow-x: auto; gap: 0.25rem; }
+  .nav-btn {
+    border-left: 0; border-bottom: 3px solid transparent;
+    border-radius: var(--radius) var(--radius) 0 0;
+    white-space: nowrap;
+  }
+  .nav-btn.is-active { border-bottom-color: var(--ink); }
+  .sidebar-foot { margin: 0 0 0 auto; }
+
+  h1 { font-size: 2.1rem; }
+  .team-grid { grid-template-columns: 1fr; }
+  th, td { padding: 0.6rem 0.6rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { transition: none; }
+}
+
+/* ---------- Team list (short rows with View button) ---------- */
+.sub-head { margin: 1.25rem 0 0.6rem; font-size: 1.25rem; color: var(--muted); }
+.sub-head:first-child { margin-top: 0; }
+
+.team-list { display: flex; flex-direction: column; gap: 0.75rem; max-width: 680px; }
+.team-row {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-left: 6px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 0.8rem 1rem;
+}
+.team-row-main {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 0.6rem 1rem;
+}
+.team-row-info { min-width: 0; }
+.team-row-info h3 { font-size: 1.3rem; overflow-wrap: anywhere; }
+.team-row .team-meta { margin: 0.15rem 0 0; }
+.team-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.team-row .squad { margin-top: 0.75rem; }
+
+.panel-actions { margin-top: 0.25rem; }
+
+/* ---------- Result chips ---------- */
+.chips li.win { background: #e3f2ea; border-color: #b7d8c4; }
+.chips small { color: var(--muted); }
+.chips .rank { font-family: var(--font-display); font-weight: 700; margin-right: 0.15rem; }
+
+</style>
+</head>
+<body>
+  <noscript>Sports Management needs JavaScript. Please turn it on in your browser.</noscript>
+
+  <!-- Login / sign up screen (filled in by script.js) -->
+  <div class="auth" id="auth" hidden></div>
+
+  <!-- Main app after login (filled in by script.js) -->
+  <div class="app" id="app" hidden></div>
+
+  <!-- Confirm dialog -->
+  <div class="modal" id="confirm-modal" hidden>
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="confirm-text">
+      <p id="confirm-text"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="confirm-no">Cancel</button>
+        <button type="button" class="btn primary" id="confirm-yes">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+(() => {
+  'use strict';
+
+  /* =====================================================================
+     Sports Management
+     - Students sign up as Captain or Player.
+     - The match admin logs in from the "Admin login" tab and enters results.
+       The points table is built automatically from those results.
+     - Data is saved in this browser only (localStorage). To share data between
+       many phones/computers you need a server + database.
+     ===================================================================== */
+
+  const DATA_KEY = 'sports-management-v2';
+  const SESSION_KEY = 'sports-management-session-v2';
+
+  // Match admin account (created automatically). Change these before real use.
+  const ADMIN = { username: 'admin', password: 'admin123', name: 'Match Admin' };
+
+  // Squad rules for each game
+  const GAMES = {
+    cricket: { key: 'cricket', label: 'Cricket', main: 11, extra: 2, maxTeams: null, type: 'match' },
+    kabaddi: { key: 'kabaddi', label: 'Kabaddi', main: 7, extra: 2, maxTeams: null, type: 'match' },
+    bgmi:    { key: 'bgmi',    label: 'BGMI',    main: 4, extra: 1, maxTeams: 16,   type: 'battle' }
+  };
+  const GAME_KEYS = Object.keys(GAMES);
+  const squadSize = (g) => g.main + g.extra;
+
+  // Points rules - change the numbers here if your rules are different
+  const WIN_POINTS = 2;                                  // Cricket and Kabaddi: winner gets 2, loser gets 0
+  const BGMI_PLACEMENT = [15, 12, 10, 8, 6, 4, 2, 1];    // Points for 1st, 2nd, 3rd ... 8th place (9th and below get 0)
+  const BGMI_KILL_POINT = 1;                             // Points for every elimination
+
+  const ROLE_LABEL = { admin: 'Match admin', captain: 'Captain', player: 'Player' };
+
+  /* ---------- State ---------- */
+  let db = { users: [], teams: [], points: [] };
+  let sessionUserId = null;
+  let view = 'home';
+  let authMode = 'login';            // 'login' | 'signup' | 'admin'
+  let authError = '';
+  let authDraft = { name: '', username: '' };
+  const expandedTeams = new Set();   // teams whose players are open in the list
+
+  /* ---------- Helpers ---------- */
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+  const esc = (value) =>
+    String(value ?? '').replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+
+  // Simple hash so passwords are not stored as plain text.
+  // This is NOT real security - a real app must hash passwords on a server.
+  function hashPassword(username, password) {
+    const s = username + ':' + password;
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36);
+  }
+
+  function ordinal(n) {
+    const suffix = ['th', 'st', 'nd', 'rd'];
+    const v = n % 100;
+    return n + (suffix[(v - 20) % 10] || suffix[v] || suffix[0]);
+  }
+
+  const placementPoints = (rank) => BGMI_PLACEMENT[rank - 1] || 0;
+
+  function ruleText(g) {
+    if (g.type === 'match') return `Winning team gets ${WIN_POINTS} points. Losing team gets 0.`;
+    const places = BGMI_PLACEMENT.map((p, i) => `${ordinal(i + 1)} ${p}`).join(', ');
+    return `Points = placement points + ${BGMI_KILL_POINT} per elimination. Placement points: ${places}; ${ordinal(BGMI_PLACEMENT.length + 1)} and below 0.`;
+  }
+
+  function todayISO() {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
+  function formatDate(iso) {
+    const d = new Date(iso + 'T00:00:00');
+    if (isNaN(d)) return iso;
+    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
+  let toastTimer;
+  function toast(message, isError = false) {
+    const el = $('#toast');
+    el.textContent = message;
+    el.classList.toggle('error', isError);
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+  }
+  const fail = (message) => toast(message, true);
+
+  // In-page dialog: the browser's built-in confirm box is blocked in some previews
+  function ask(message) {
+    return new Promise((resolve) => {
+      const modal = $('#confi
