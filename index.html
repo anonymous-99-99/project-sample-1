@@ -616,4 +616,842 @@ td.pts { font-weight: 700; }
   // In-page dialog: the browser's built-in confirm box is blocked in some previews
   function ask(message) {
     return new Promise((resolve) => {
-      const modal = $('#confi
+      const modal = $('#confirm-modal');
+      const yes = $('#confirm-yes');
+      const no = $('#confirm-no');
+      $('#confirm-text').textContent = message;
+      modal.hidden = false;
+      const done = (result) => {
+        modal.hidden = true;
+        yes.onclick = null;
+        no.onclick = null;
+        resolve(result);
+      };
+      yes.onclick = () => done(true);
+      no.onclick = () => done(false);
+      no.focus();
+    });
+  }
+
+  /* ---------- Storage ---------- */
+  function save() {
+    try { localStorage.setItem(DATA_KEY, JSON.stringify(db)); } catch (err) { console.warn('Could not save:', err); }
+  }
+
+  function saveSession() {
+    try {
+      if (sessionUserId) localStorage.setItem(SESSION_KEY, sessionUserId);
+      else localStorage.removeItem(SESSION_KEY);
+    } catch (err) { /* ignore */ }
+  }
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(DATA_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.users) && Array.isArray(parsed.teams) && Array.isArray(parsed.points)) db = parsed;
+      }
+      sessionUserId = localStorage.getItem(SESSION_KEY);
+    } catch (err) {
+      console.warn('Could not read saved data:', err);
+    }
+
+    if (!db.users.some((u) => u.role === 'admin')) {
+      db.users.push({
+        id: uid(), name: ADMIN.name, username: ADMIN.username,
+        pass: hashPassword(ADMIN.username, ADMIN.password), role: 'admin'
+      });
+      save();
+    }
+  }
+
+  /* ---------- Data lookups ---------- */
+  const userById = (id) => db.users.find((u) => u.id === id);
+  const teamById = (id) => db.teams.find((t) => t.id === id);
+  const teamsOf = (gameKey) => db.teams.filter((t) => t.game === gameKey);
+  const currentUser = () => db.users.find((u) => u.id === sessionUserId) || null;
+  const teamOfUser = (userId, gameKey) => teamsOf(gameKey).find((t) => t.members.includes(userId));
+  const teamName = (id) => (teamById(id) ? teamById(id).name : 'Removed team');
+
+  // Points table: built automatically from the results the admin has entered
+  function standings(gameKey) {
+    return teamsOf(gameKey)
+      .map((t) => {
+        const entries = db.points.filter((p) => p.teamId === t.id);
+        return {
+          id: t.id,
+          name: t.name,
+          matches: entries.length,
+          won: entries.filter((p) => p.result === 'win').length,
+          lost: entries.filter((p) => p.result === 'loss').length,
+          kills: entries.reduce((sum, p) => sum + (p.kills || 0), 0),
+          points: entries.reduce((sum, p) => sum + p.points, 0)
+        };
+      })
+      .sort((a, b) =>
+        b.points - a.points ||
+        (gameKey === 'bgmi' ? b.kills - a.kills : b.won - a.won) ||
+        a.name.localeCompare(b.name));
+  }
+
+  function matchGroups(gameKey) {
+    const groups = new Map();
+    db.points.filter((p) => p.game === gameKey).forEach((p) => {
+      if (!groups.has(p.matchId)) groups.set(p.matchId, { id: p.matchId, name: p.matchName, date: p.date, entries: [] });
+      groups.get(p.matchId).entries.push(p);
+    });
+    return Array.from(groups.values()).reverse(); // newest first
+  }
+
+  /* =====================================================================
+     Rendering
+     ===================================================================== */
+  function render() {
+    const user = currentUser();
+    if (!user && sessionUserId) { sessionUserId = null; saveSession(); }
+    $('#auth').hidden = !!user;
+    $('#app').hidden = !user;
+    if (user) renderApp(user); else renderAuth();
+  }
+
+  /* ---------- Login / sign up ---------- */
+  function renderAuth() {
+    let fields;
+
+    if (authMode === 'signup') {
+      fields = `
+        <label>Full name
+          <input id="f-name" maxlength="40" autocomplete="name" value="${esc(authDraft.name)}">
+        </label>
+        <label>Username
+          <input id="f-username" maxlength="20" autocomplete="username" autocapitalize="none" placeholder="Letters, numbers, . _ -" value="${esc(authDraft.username)}">
+        </label>
+        <label>Password
+          <input id="f-password" type="password" autocomplete="new-password" placeholder="At least 4 characters">
+        </label>
+        <label>I am a
+          <select id="f-role">
+            <option value="player">Player (join a team)</option>
+            <option value="captain">Captain (create and manage a team)</option>
+          </select>
+        </label>
+        <button type="button" class="btn primary block" data-action="signup">Create account</button>`;
+    } else {
+      const isAdmin = authMode === 'admin';
+      fields = `
+        ${isAdmin ? '<p class="muted">Only the match admin can enter results and award points.</p>' : ''}
+        <label>Username
+          <input id="f-username" autocomplete="username" autocapitalize="none" value="${esc(authDraft.username)}">
+        </label>
+        <label>Password
+          <input id="f-password" type="password" autocomplete="current-password">
+        </label>
+        <button type="button" class="btn primary block" data-action="login">${isAdmin ? 'Log in as admin' : 'Log in'}</button>`;
+    }
+
+    const tab = (mode, label) =>
+      `<button type="button" class="tab ${authMode === mode ? 'is-active' : ''}" data-action="auth-tab" data-mode="${mode}">${label}</button>`;
+
+    $('#auth').innerHTML = `
+      <div class="auth-card">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-name">Sports<br>Management</span>
+        </div>
+        <div class="tabs">
+          ${tab('login', 'Student login')}
+          ${tab('signup', 'Sign up')}
+          ${tab('admin', 'Admin login')}
+        </div>
+        ${authError ? `<p class="form-error" role="alert">${esc(authError)}</p>` : ''}
+        ${fields}
+      </div>`;
+  }
+
+  /* ---------- App shell ---------- */
+  function renderApp(user) {
+    const navItems = [{ key: 'home', label: 'Home' }, ...GAME_KEYS.map((k) => ({ key: k, label: GAMES[k].label }))];
+
+    const nav = navItems.map((n) => {
+      const isGame = !!GAMES[n.key];
+      return `<button type="button" class="nav-btn ${view === n.key ? 'is-active' : ''}" data-nav="${n.key}"${isGame ? ` data-game="${n.key}"` : ''}>
+        ${isGame ? '<span class="dot"></span>' : ''}${esc(n.label)}
+      </button>`;
+    }).join('');
+
+    $('#app').innerHTML = `
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-name">Sports<br>Management</span>
+        </div>
+        <div class="user-chip">
+          <strong>${esc(user.name)}</strong>
+          <span class="badge ${user.role}">${ROLE_LABEL[user.role]}</span>
+        </div>
+        <nav class="nav" aria-label="Main">${nav}</nav>
+        <div class="sidebar-foot">
+          <button type="button" class="link-btn" data-action="logout">Log out</button>
+        </div>
+      </aside>
+      <main class="main">${view === 'home' ? homeHTML(user) : gameHTML(GAMES[view], user)}</main>`;
+
+    syncWinnerOptions();
+  }
+
+  /* ---------- Home ---------- */
+  function homeHTML(user) {
+    const intro = {
+      captain: 'Create a team in each game you captain, then manage who plays and who is an extra.',
+      player: 'Join a team in each game you play. You can leave a team whenever you need to.',
+      admin: 'Open a game and enter match results. The points table updates by itself.'
+    }[user.role];
+
+    const firstName = user.name.split(' ')[0];
+
+    // Games where you are registered come first, the rest go to the bottom
+    const rows = GAME_KEYS
+      .map((k) => ({ g: GAMES[k], team: teamOfUser(user.id, k) }))
+      .sort((a, b) => (b.team ? 1 : 0) - (a.team ? 1 : 0));
+
+    const yourTeams = user.role === 'admin' ? '' : `
+      <section class="panel">
+        <h2>Your teams</h2>
+        <ul class="plain-list">
+          ${rows.map(({ g, team }) => `
+            <li>
+              <span><strong>${g.label}</strong>: ${team
+                ? `${esc(team.name)} <span class="muted">(${team.members.length}/${squadSize(g)} players)</span>`
+                : '<span class="muted">Not registered</span>'}</span>
+              <button type="button" class="btn small" data-nav="${g.key}">${team ? 'Open' : (user.role === 'captain' ? 'Create team' : 'Find a team')}</button>
+            </li>`).join('')}
+        </ul>
+      </section>`;
+
+    const cards = GAME_KEYS.map((k) => {
+      const g = GAMES[k];
+      const teams = teamsOf(k);
+      const lead = standings(k)[0];
+      const registered = g.maxTeams
+        ? `${teams.length} of ${g.maxTeams} teams registered`
+        : `${teams.length} ${teams.length === 1 ? 'team' : 'teams'} registered`;
+      return `
+        <article class="game-card" data-game="${k}">
+          <h2>${g.label}</h2>
+          <p class="muted">${g.main} playing + ${g.extra} extra per team</p>
+          <p>${registered}</p>
+          <p>${lead && lead.points > 0 ? `Leading: <strong>${esc(lead.name)}</strong> (${lead.points} pts)` : 'No points awarded yet'}</p>
+          <button type="button" class="btn small primary" data-nav="${k}">Open ${g.label} dashboard</button>
+        </article>`;
+    }).join('');
+
+    return `
+      <div class="hero">
+        <h1>Welcome, ${esc(firstName)}</h1>
+        <p>${intro}</p>
+      </div>
+      ${yourTeams}
+      <h2>Games</h2>
+      <div class="game-cards">${cards}</div>`;
+  }
+
+  /* ---------- Game dashboard ---------- */
+  function gameHTML(g, user) {
+    const teams = teamsOf(g.key);
+    const total = squadSize(g);
+    const isFullLeague = !!g.maxTeams && teams.length >= g.maxTeams;
+    const percent = g.maxTeams ? Math.min(100, Math.round((teams.length / g.maxTeams) * 100)) : 0;
+
+    const hero = `
+      <div class="hero">
+        <h1>${g.label}</h1>
+        <p>Every team has ${g.main} playing players and ${g.extra} extra ${g.extra === 1 ? 'player' : 'players'} for emergencies.${g.maxTeams ? ` Up to ${g.maxTeams} teams can register.` : ''}</p>
+        <div class="hero-stats">
+          <div><b>${teams.length}${g.maxTeams ? ` / ${g.maxTeams}` : ''}</b><span>Teams registered</span></div>
+          <div><b>${g.main} + ${g.extra}</b><span>Playing + extra</span></div>
+          <div><b>${total}</b><span>Players per team</span></div>
+        </div>
+        ${g.maxTeams ? `<div class="meter" aria-hidden="true"><span style="width:${percent}%"></span></div>` : ''}
+      </div>`;
+
+    return `<div data-game="${g.key}">
+      ${hero}
+      ${standingsHTML(g, user)}
+      ${user.role === 'admin' ? adminPanelHTML(g, teams) : registerPanelHTML(g, user, teams, isFullLeague)}
+      ${teamsSectionHTML(g, user, teams, isFullLeague)}
+      ${historyHTML(g, user)}
+    </div>`;
+  }
+
+  function standingsHTML(g, user) {
+    const rows = standings(g.key);
+    const mine = teamOfUser(user.id, g.key);
+    const isBattle = g.type === 'battle';
+
+    const head = isBattle
+      ? '<th class="num">#</th><th>Team</th><th class="num">Matches</th><th class="num">Eliminations</th><th class="num">Points</th>'
+      : '<th class="num">#</th><th>Team</th><th class="num">Played</th><th class="num">Won</th><th class="num">Lost</th><th class="num">Points</th>';
+    const cols = isBattle ? 5 : 6;
+
+    const body = rows.length
+      ? rows.map((r, i) => `
+          <tr class="${mine && mine.id === r.id ? 'mine' : ''}">
+            <td class="num">${i + 1}</td>
+            <td>${esc(r.name)}</td>
+            ${isBattle
+              ? `<td class="num">${r.matches}</td><td class="num">${r.kills}</td>`
+              : `<td class="num">${r.matches}</td><td class="num">${r.won}</td><td class="num">${r.lost}</td>`}
+            <td class="num pts">${r.points}</td>
+          </tr>`).join('')
+      : `<tr><td colspan="${cols}" class="empty">No teams yet, so there is no table.</td></tr>`;
+
+    return `
+      <section>
+        <div class="section-head"><h2>Points table</h2></div>
+        <div class="panel table-wrap">
+          <table>
+            <thead><tr>${head}</tr></thead>
+            <tbody>${body}</tbody>
+          </table>
+        </div>
+        <p class="hint">${esc(ruleText(g))} Teams are ranked by points.</p>
+      </section>`;
+  }
+
+  /* Admin: enter results */
+  function adminPanelHTML(g, teams) {
+    if (g.type === 'match') {
+      if (teams.length < 2) {
+        return '<section class="panel note">At least two teams must register before you can record a match.</section>';
+      }
+      const options = (selectedIndex) => teams
+        .map((t, i) => `<option value="${t.id}" ${i === selectedIndex ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
+      return `
+        <section class="panel">
+          <h2>Record match result</h2>
+          <p class="muted">Pick the two teams and the winner. The winner gets ${WIN_POINTS} points, the other team gets 0, and the points table updates automatically.</p>
+          <div class="form-row">
+            <label>Team 1 <select id="m-a">${options(0)}</select></label>
+            <label>Team 2 <select id="m-b">${options(1)}</select></label>
+            <label>Winner
+              <select id="m-win">
+                <option value="">Choose winner</option>
+                <option value="a">Team 1</option>
+                <option value="b">Team 2</option>
+              </select>
+            </label>
+          </div>
+          <div class="panel-actions"><button type="button" class="btn primary" data-action="record-result">Save result</button></div>
+        </section>`;
+    }
+
+    if (!teams.length) {
+      return '<section class="panel note">Teams must register before you can enter a BGMI match.</section>';
+    }
+    return `
+      <section class="panel">
+        <h2>Enter BGMI match result</h2>
+        <p class="muted">Enter each team's final rank in the game and its total eliminations. Points are worked out automatically. Leave a team blank if it did not play.</p>
+        <div class="form-row" style="margin-bottom:1rem">
+          <label>Match name <input id="award-name" maxlength="40" placeholder="Match 1"></label>
+        </div>
+        <div class="table-wrap" style="margin-bottom:0.75rem">
+          <table>
+            <thead><tr><th>Team</th><th class="num">Rank</th><th class="num">Eliminations</th></tr></thead>
+            <tbody>
+              ${teams.map((t) => `
+                <tr>
+                  <td>${esc(t.name)}</td>
+                  <td class="num"><input class="pt-input rank-input" type="number" min="1" max="${teams.length}" inputmode="numeric" data-team="${t.id}" aria-label="Rank of ${esc(t.name)}"></td>
+                  <td class="num"><input class="pt-input kill-input" type="number" min="0" max="99" inputmode="numeric" data-team="${t.id}" aria-label="Eliminations of ${esc(t.name)}"></td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+        <p class="hint">${esc(ruleText(g))}</p>
+        <div class="panel-actions"><button type="button" class="btn primary" data-action="save-bgmi">Save match</button></div>
+      </section>`;
+  }
+
+  /* Captain: create team. Player: hint */
+  function registerPanelHTML(g, user, teams, isFullLeague) {
+    if (user.role === 'captain') {
+      const mine = teams.find((t) => t.captainId === user.id);
+      if (mine) {
+        return `<section class="panel note">You are the captain of <strong>${esc(mine.name)}</strong>. Manage its squad below.</section>`;
+      }
+      if (isFullLeague) {
+        return `<section class="panel warn"><strong>Registration is full.</strong> All ${g.maxTeams} team places are taken.</section>`;
+      }
+      return `
+        <section class="panel">
+          <h2>Create your ${g.label} team</h2>
+          <div class="form-row">
+            <label>Team name
+              <input id="new-team-name" maxlength="30" placeholder="Enter a team name">
+            </label>
+            <button type="button" class="btn primary" data-action="create-team">Create team</button>
+          </div>
+          <p class="hint">You join as playing member 1. Other students join your team, and you decide who plays and who is an extra.</p>
+        </section>`;
+    }
+
+    const mine = teamOfUser(user.id, g.key);
+    return mine
+      ? `<section class="panel note">You are in <strong>${esc(mine.name)}</strong>.</section>`
+      : '<section class="panel note">Pick a team below and press Join team. Only captains can create teams.</section>';
+  }
+
+  /* Teams: your own team in full, other teams as a short list with a View button */
+  function teamsSectionHTML(g, user, teams, isFullLeague) {
+    const myTeam = teamOfUser(user.id, g.key);
+    const others = teams.filter((t) => !myTeam || t.id !== myTeam.id);
+
+    let body = '';
+    if (!teams.length) {
+      body = '<div class="panel empty">No teams have registered yet.</div>';
+    } else {
+      if (myTeam) body += `<h3 class="sub-head">Your team</h3>${teamCardHTML(myTeam, g, user)}`;
+      if (others.length) {
+        body += `<h3 class="sub-head">${myTeam ? 'Other teams' : 'All teams'}</h3>
+          <div class="team-list">${others.map((t) => teamRowHTML(t, g, user, myTeam)).join('')}</div>`;
+      }
+    }
+
+    const status = g.maxTeams
+      ? (isFullLeague ? 'Registration full' : `${g.maxTeams - teams.length} team places left`)
+      : `${teams.length} ${teams.length === 1 ? 'team' : 'teams'}`;
+
+    return `
+      <section>
+        <div class="section-head">
+          <h2>Teams and registration</h2>
+          <span class="muted">${status}</span>
+        </div>
+        ${body}
+      </section>`;
+  }
+
+  function squadHTML(t, g, isOwner) {
+    const total = squadSize(g);
+    const count = t.members.length;
+    let slots = '';
+
+    for (let i = 0; i < total; i++) {
+      if (i === g.main) slots += '<li class="squad-divider">Extra players (for emergencies)</li>';
+      const label = i < g.main ? String(i + 1) : 'E' + (i - g.main + 1);
+      const memberId = t.members[i];
+
+      if (memberId) {
+        const member = userById(memberId);
+        const memberName = member ? member.name : 'Unknown player';
+        const isCaptain = memberId === t.captainId;
+        const isExtra = i >= g.main;
+        const controls = isOwner && !isCaptain ? `
+          <span class="slot-actions">
+            <button type="button" class="btn small" data-action="move-up" data-team="${t.id}" data-user="${memberId}" aria-label="Move ${esc(memberName)} up" ${i <= 1 ? 'disabled' : ''}>Up</button>
+            <button type="button" class="btn small" data-action="move-down" data-team="${t.id}" data-user="${memberId}" aria-label="Move ${esc(memberName)} down" ${i >= count - 1 ? 'disabled' : ''}>Down</button>
+            <button type="button" class="btn small danger" data-action="kick" data-team="${t.id}" data-user="${memberId}" aria-label="Remove ${esc(memberName)}">Remove</button>
+          </span>` : '';
+        slots += `
+          <li class="slot filled ${isExtra ? 'is-extra' : ''}">
+            <span class="slot-no">${label}</span>
+            <span class="slot-name">${esc(memberName)}</span>
+            ${isCaptain ? '<span class="badge captain">Captain</span>' : ''}
+            ${isExtra ? '<span class="badge extra">Extra</span>' : ''}
+            ${controls}
+          </li>`;
+      } else {
+        slots += `
+          <li class="slot empty">
+            <span class="slot-no">${label}</span>
+            <span class="slot-name">Open slot</span>
+          </li>`;
+      }
+    }
+    return slots;
+  }
+
+  const teamBadge = (count, total) =>
+    count >= total ? '<span class="badge full">Full</span>' : `<span class="badge open">${total - count} open</span>`;
+
+  // Full card: used for the team you belong to
+  function teamCardHTML(t, g, user) {
+    const total = squadSize(g);
+    const count = t.members.length;
+    const captain = userById(t.captainId);
+    const isOwner = user.role === 'captain' && t.captainId === user.id;
+    const isMember = t.members.includes(user.id);
+
+    let actions = '';
+    if (user.role === 'player' && isMember) {
+      actions = `<button type="button" class="btn danger" data-action="exit-team" data-team="${t.id}">Exit team</button>`;
+    } else if (isOwner) {
+      actions = `<button type="button" class="btn danger" data-action="remove-team" data-team="${t.id}">Remove team</button>`;
+    }
+
+    return `
+      <article class="team-card mine">
+        <div class="team-head">
+          <h3>${esc(t.name)}</h3>
+          <span class="team-badges">
+            <span class="badge yours">Your team</span>
+            ${teamBadge(count, total)}
+          </span>
+        </div>
+        <p class="team-meta">Captain: ${esc(captain ? captain.name : 'Unknown')} &middot; ${count} of ${total} players</p>
+        <ol class="squad">${squadHTML(t, g, isOwner)}</ol>
+        ${isOwner ? '<p class="hint">Use Up and Down to move a player between the playing squad and the extras.</p>' : ''}
+        ${actions ? `<div class="team-actions">${actions}</div>` : ''}
+      </article>`;
+  }
+
+  // Short row: team name + View button. Players show when View is pressed.
+  function teamRowHTML(t, g, user, myTeam) {
+    const total = squadSize(g);
+    const count = t.members.length;
+    const isFull = count >= total;
+    const captain = userById(t.captainId);
+    const expanded = expandedTeams.has(t.id);
+
+    let join = '';
+    if (user.role === 'player' && !myTeam) {
+      join = isFull
+        ? '<button type="button" class="btn small" disabled>Full</button>'
+        : `<button type="button" class="btn small primary" data-action="join-team" data-team="${t.id}">Join team</button>`;
+    }
+
+    return `
+      <article class="team-row">
+        <div class="team-row-main">
+          <div class="team-row-info">
+            <h3>${esc(t.name)}</h3>
+            <p class="team-meta">Captain: ${esc(captain ? captain.name : 'Unknown')} &middot; ${count} of ${total} players</p>
+          </div>
+          <div class="team-row-actions">
+            ${teamBadge(count, total)}
+            <button type="button" class="btn small" data-action="toggle-team" data-team="${t.id}" aria-expanded="${expanded}">${expanded ? 'Hide' : 'View'}</button>
+            ${join}
+          </div>
+        </div>
+        ${expanded ? `<ol class="squad">${squadHTML(t, g, false)}</ol>` : ''}
+      </article>`;
+  }
+
+  function historyEntryHTML(e, g) {
+    const name = esc(teamName(e.teamId));
+    if (g.type === 'battle' && e.rank) {
+      return `<li><span class="rank">#${e.rank}</span> ${name} <small>${e.kills || 0} elims</small><b>${e.points}</b></li>`;
+    }
+    return `<li class="${e.result === 'win' ? 'win' : ''}">${name}${e.result === 'win' ? ' <small>won</small>' : ''}<b>${e.points}</b></li>`;
+  }
+
+  function historyHTML(g, user) {
+    const groups = matchGroups(g.key);
+    const sortEntries = (list) => list.slice().sort((a, b) =>
+      (a.rank && b.rank) ? a.rank - b.rank : b.points - a.points);
+
+    return `
+      <section>
+        <div class="section-head"><h2>Match results</h2></div>
+        <div class="panel">
+          ${groups.length ? groups.map((m) => `
+            <div class="history-item">
+              <div class="history-head">
+                <strong>${esc(m.name)}</strong>
+                <span class="muted">${esc(formatDate(m.date))}</span>
+                ${user.role === 'admin' ? `<button type="button" class="btn small danger" data-action="delete-match" data-match="${m.id}">Delete</button>` : ''}
+              </div>
+              <ul class="chips">${sortEntries(m.entries).map((e) => historyEntryHTML(e, g)).join('')}</ul>
+            </div>`).join('') : '<p class="muted">No results yet. They appear here after the admin enters a match.</p>'}
+        </div>
+      </section>`;
+  }
+
+  // Show the team names in the "Winner" list
+  function syncWinnerOptions() {
+    const a = $('#m-a');
+    const b = $('#m-b');
+    const w = $('#m-win');
+    if (!a || !b || !w) return;
+    const nameOf = (sel) => (sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '');
+    w.options[1].text = nameOf(a) || 'Team 1';
+    w.options[2].text = nameOf(b) || 'Team 2';
+  }
+
+  /* =====================================================================
+     Actions
+     ===================================================================== */
+  function doLogin() {
+    const asAdmin = authMode === 'admin';
+    const username = $('#f-username').value.trim().toLowerCase();
+    const password = $('#f-password').value;
+    authDraft.username = username;
+
+    const user = db.users.find((u) => u.username === username);
+    if (!user || user.pass !== hashPassword(username, password)) {
+      authError = 'Wrong username or password.';
+    } else if (asAdmin && user.role !== 'admin') {
+      authError = 'This is not an admin account. Use the Student login tab.';
+    } else if (!asAdmin && user.role === 'admin') {
+      authError = 'Admins log in from the Admin login tab.';
+    } else {
+      authError = '';
+    }
+
+    if (authError) { renderAuth(); return; }
+
+    authDraft = { name: '', username: '' };
+    sessionUserId = user.id;
+    saveSession();
+    view = 'home';
+    render();
+  }
+
+  function doSignup() {
+    const name = $('#f-name').value.trim();
+    const username = $('#f-username').value.trim().toLowerCase();
+    const password = $('#f-password').value;
+    const role = $('#f-role').value;
+    authDraft = { name, username };
+
+    if (name.length < 2) authError = 'Enter your full name.';
+    else if (!/^[a-z0-9_.-]{3,20}$/.test(username)) authError = 'Username must be 3 to 20 characters: letters, numbers, . _ -';
+    else if (db.users.some((u) => u.username === username)) authError = 'That username is already taken.';
+    else if (password.length < 4) authError = 'Password must be at least 4 characters.';
+    else if (role !== 'player' && role !== 'captain') authError = 'Choose Player or Captain.';
+    else authError = '';
+
+    if (authError) { renderAuth(); return; }
+
+    const user = { id: uid(), name, username, pass: hashPassword(username, password), role };
+    db.users.push(user);
+    save();
+    sessionUserId = user.id;
+    saveSession();
+    authDraft = { name: '', username: '' };
+    view = 'home';
+    render();
+    toast(`Welcome, ${name.split(' ')[0]}!`);
+  }
+
+  async function handleAppAction(action, data, user) {
+    const g = GAMES[view];
+
+    if (action === 'toggle-team') {
+      if (expandedTeams.has(data.team)) expandedTeams.delete(data.team); else expandedTeams.add(data.team);
+      render();
+      const again = $(`[data-action="toggle-team"][data-team="${data.team}"]`);
+      if (again) again.focus();
+      return;
+    }
+
+    if (action === 'create-team') {
+      if (user.role !== 'captain' || !g) return;
+      const name = $('#new-team-name').value.trim();
+      const teams = teamsOf(g.key);
+      if (!name) return fail('Enter a team name.');
+      if (teams.some((t) => t.captainId === user.id)) return fail(`You already have a ${g.label} team.`);
+      if (g.maxTeams && teams.length >= g.maxTeams) return fail(`Registration is full: ${g.maxTeams} teams have registered.`);
+      if (teams.some((t) => t.name.toLowerCase() === name.toLowerCase())) return fail(`A ${g.label} team named "${name}" already exists.`);
+
+      db.teams.push({ id: uid(), game: g.key, name, captainId: user.id, members: [user.id] });
+      save(); render();
+      toast(`${name} created.`);
+      return;
+    }
+
+    if (action === 'remove-team') {
+      const team = teamById(data.team);
+      if (!team || user.role !== 'captain' || team.captainId !== user.id) return;
+      const others = team.members.length - 1;
+      const detail = others > 0 ? `\n\n${others} ${others === 1 ? 'player' : 'players'} will be removed from the team, and its points are deleted.` : '';
+      if (!(await ask(`Remove the team ${team.name}?${detail}`))) return;
+      db.teams = db.teams.filter((t) => t.id !== team.id);
+      db.points = db.points.filter((p) => p.teamId !== team.id);
+      expandedTeams.delete(team.id);
+      save(); render();
+      toast(`${team.name} removed.`);
+      return;
+    }
+
+    if (action === 'join-team') {
+      const team = teamById(data.team);
+      if (!team || user.role !== 'player') return;
+      const game = GAMES[team.game];
+      if (teamOfUser(user.id, team.game)) return fail(`You are already in a ${game.label} team.`);
+      if (team.members.length >= squadSize(game)) return fail('This team is full.');
+      team.members.push(user.id);
+      const isExtra = team.members.length > game.main;
+      save(); render();
+      toast(isExtra ? `You joined ${team.name} as an extra player.` : `You joined ${team.name}.`);
+      return;
+    }
+
+    if (action === 'exit-team') {
+      const team = teamById(data.team);
+      if (!team || user.role !== 'player' || !team.members.includes(user.id)) return;
+      if (!(await ask(`Exit ${team.name}?`))) return;
+      team.members = team.members.filter((id) => id !== user.id);
+      save(); render();
+      toast(`You left ${team.name}.`);
+      return;
+    }
+
+    if (action === 'kick') {
+      const team = teamById(data.team);
+      if (!team || user.role !== 'captain' || team.captainId !== user.id) return;
+      if (data.user === team.captainId || !team.members.includes(data.user)) return;
+      const member = userById(data.user);
+      if (!(await ask(`Remove ${member ? member.name : 'this player'} from ${team.name}?`))) return;
+      team.members = team.members.filter((id) => id !== data.user);
+      save(); render();
+      toast('Player removed.');
+      return;
+    }
+
+    if (action === 'move-up' || action === 'move-down') {
+      const team = teamById(data.team);
+      if (!team || user.role !== 'captain' || team.captainId !== user.id) return;
+      const i = team.members.indexOf(data.user);
+      const j = action === 'move-up' ? i - 1 : i + 1;
+      // The captain stays in slot 1
+      if (i < 1 || j < 1 || j >= team.members.length) return;
+      [team.members[i], team.members[j]] = [team.members[j], team.members[i]];
+      save(); render();
+      return;
+    }
+
+    /* ----- Admin: Cricket / Kabaddi result ----- */
+    if (action === 'record-result') {
+      if (user.role !== 'admin' || !g || g.type !== 'match') return;
+      const aId = $('#m-a').value;
+      const bId = $('#m-b').value;
+      const win = $('#m-win').value;
+      const teamA = teamById(aId);
+      const teamB = teamById(bId);
+
+      if (!teamA || !teamB || teamA.game !== g.key || teamB.game !== g.key) return fail('Choose both teams.');
+      if (aId === bId) return fail('Choose two different teams.');
+      if (win !== 'a' && win !== 'b') return fail('Choose the winning team.');
+
+      const winner = win === 'a' ? teamA : teamB;
+      const loser = win === 'a' ? teamB : teamA;
+      const matchId = uid();
+      const date = todayISO();
+      const matchName = `${teamA.name} vs ${teamB.name}`;
+
+      db.points.push({ id: uid(), matchId, game: g.key, matchName, teamId: winner.id, points: WIN_POINTS, result: 'win', date });
+      db.points.push({ id: uid(), matchId, game: g.key, matchName, teamId: loser.id, points: 0, result: 'loss', date });
+      save(); render();
+      toast(`${winner.name} won: ${WIN_POINTS} points added.`);
+      return;
+    }
+
+    /* ----- Admin: BGMI result (rank + eliminations) ----- */
+    if (action === 'save-bgmi') {
+      if (user.role !== 'admin' || !g || g.type !== 'battle') return;
+      const matchName = $('#award-name').value.trim();
+      if (!matchName) return fail('Enter a match name.');
+
+      const teamCount = teamsOf(g.key).length;
+      const entries = [];
+      const usedRanks = new Set();
+
+      for (const rankInput of $$('.rank-input')) {
+        const teamId = rankInput.dataset.team;
+        const killInput = $(`.kill-input[data-team="${teamId}"]`);
+        const rankRaw = rankInput.value.trim();
+        const killRaw = killInput ? killInput.value.trim() : '';
+        if (rankRaw === '' && killRaw === '') continue;
+
+        const name = teamName(teamId);
+        if (rankRaw === '') return fail(`Enter the rank for ${name}.`);
+        if (!/^\d{1,2}$/.test(rankRaw) || +rankRaw < 1 || +rankRaw > teamCount) return fail(`Rank for ${name} must be from 1 to ${teamCount}.`);
+        if (killRaw !== '' && !/^\d{1,2}$/.test(killRaw)) return fail(`Eliminations for ${name} must be a whole number.`);
+
+        const rank = parseInt(rankRaw, 10);
+        if (usedRanks.has(rank)) return fail(`Rank ${rank} is given to more than one team.`);
+        usedRanks.add(rank);
+
+        const kills = killRaw === '' ? 0 : parseInt(killRaw, 10);
+        entries.push({ teamId, rank, kills, points: placementPoints(rank) + kills * BGMI_KILL_POINT });
+      }
+      if (!entries.length) return fail('Enter the rank and eliminations for at least one team.');
+
+      const matchId = uid();
+      const date = todayISO();
+      entries.forEach((e) => db.points.push({
+        id: uid(), matchId, game: g.key, matchName, date,
+        teamId: e.teamId, rank: e.rank, kills: e.kills, points: e.points
+      }));
+      save(); render();
+      toast('Match saved. Points table updated.');
+      return;
+    }
+
+    if (action === 'delete-match') {
+      if (user.role !== 'admin') return;
+      if (!(await ask('Delete this match and the points it gave?'))) return;
+      db.points = db.points.filter((p) => p.matchId !== data.match);
+      save(); render();
+      toast('Match deleted.');
+    }
+  }
+
+  /* ---------- Events ---------- */
+  document.addEventListener('click', async (e) => {
+    const navBtn = e.target.closest('[data-nav]');
+    if (navBtn) {
+      view = navBtn.dataset.nav;
+      render();
+      window.scrollTo({ top: 0 });
+      return;
+    }
+
+    const btn = e.target.closest('[data-action]');
+    if (!btn || btn.disabled) return;
+    const action = btn.dataset.action;
+
+    if (action === 'auth-tab') { authMode = btn.dataset.mode; authError = ''; renderAuth(); return; }
+    if (action === 'login') { doLogin(); return; }
+    if (action === 'signup') { doSignup(); return; }
+    if (action === 'logout') {
+      sessionUserId = null; saveSession();
+      view = 'home'; authMode = 'login'; authError = '';
+      render();
+      return;
+    }
+
+    const user = currentUser();
+    if (!user) return;
+    await handleAppAction(action, btn.dataset, user);
+  });
+
+  document.addEventListener('change', (e) => {
+    if (e.target.id === 'm-a' || e.target.id === 'm-b') syncWinnerOptions();
+  });
+
+  // Press Enter to submit the login, sign up and create-team fields
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
+    if (e.target.closest('#auth')) {
+      e.preventDefault();
+      const primary = $('#auth [data-action="login"], #auth [data-action="signup"]');
+      if (primary) primary.click();
+    } else if (e.target.id === 'new-team-name') {
+      e.preventDefault();
+      const create = $('[data-action="create-team"]');
+      if (create) create.click();
+    }
+  });
+
+  /* ---------- Start ---------- */
+  load();
+  render();
+})();
+
+</script>
+</body>
+</html>
